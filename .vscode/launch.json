@@ -7,6 +7,13 @@
             "type": "hl",
             "cwd": "${workspaceRoot}",
             "preLaunchTask": "HaxeActiveConf"
+        },
+        {
+            "name": "Chrome JS debug",
+            "request": "launch",
+            "type": "chrome",
+            "file": "${workspaceFolder}/js.html",
+            "preLaunchTask": "HaxeActiveConf"
         }
     ]
 }

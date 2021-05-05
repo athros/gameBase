@@ -13,10 +13,13 @@ class Assets {
 	public static var fontMedium : h2d.Font;
 	public static var fontLarge : h2d.Font;
 
-	// Sprite atlas
+	/** Main atlas **/
 	public static var tiles : SpriteLib;
 
-	// LDtk world data
+	/** Fully typed access to slice names present in Aseprite file (eg. `trace(tilesDict.myStoneTexture)` )**/
+	public static var tilesDict = dn.heaps.assets.Aseprite.getDict(hxd.Res.atlas.tiles);
+
+	/** LDtk world data **/
 	public static var worldData : World;
 
 
@@ -33,8 +36,8 @@ class Assets {
 		fontMedium = hxd.Res.fonts.barlow_condensed_medium_regular_17.toFont();
 		fontLarge = hxd.Res.fonts.barlow_condensed_medium_regular_32.toFont();
 
-		// Atlas
-		tiles = dn.heaps.assets.Atlas.load("atlas/tiles.atlas");
+		// build sprite atlas directly from Aseprite file
+		tiles = dn.heaps.assets.Aseprite.convertToSLib(Const.FPS, hxd.Res.atlas.tiles.toAseprite());
 
 		// CastleDB file hot reloading
 		#if debug
@@ -43,14 +46,27 @@ class Assets {
 			App.ME.delayer.cancelById("cdb");
 			App.ME.delayer.addS("cdb", function() {
 				CastleDb.load( hxd.Res.data.entry.getBytes().toString() );
+				Const.fillCdbValues();
 				if( Game.exists() )
-					Game.ME.onCdbReload();
+					Game.ME.onDbReload();
 			}, 0.2);
 		});
 		#end
 
 		// Parse castleDB JSON
 		CastleDb.load( hxd.Res.data.entry.getText() );
+		Const.fillCdbValues();
+
+		// `const.json` hot-reloading
+		hxd.Res.const.watch(function() {
+			// Only reload actual updated file from disk after a short delay, to avoid reading a file being written
+			App.ME.delayer.cancelById("constJson");
+			App.ME.delayer.addS("constJson", function() {
+				Const.fillJsonValues( hxd.Res.const.entry.getBytes().toString() );
+				if( Game.exists() )
+					Game.ME.onDbReload();
+			}, 0.2);
+		});
 
 		// LDtk init & parsing
 		worldData = new World();
@@ -74,6 +90,7 @@ class Assets {
 
 	public static function update(tmod) {
 		tiles.tmod = tmod;
+		// <-- add other atlas TMOD updates here
 	}
 
 }
