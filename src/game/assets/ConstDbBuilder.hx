@@ -41,6 +41,16 @@ class ConstDbBuilder {
 	}
 
 
+	/** Remove invalid characters from a given string **/
+	static inline function cleanupIdentifier(str:String) {
+		if( str==null )
+			return "";
+		else
+			return ~/[^a-z0-9_]/gi.replace(str, "_");
+	}
+
+
+
 	/**
 		Lookup a file in all known paths
 	**/
@@ -80,10 +90,13 @@ class ConstDbBuilder {
 			Context.fatalError("File not found: "+basePath, pos);
 			return;
 		}
+
+		var fileName = dn.FilePath.extractFileWithExt(path);
 		Context.registerModuleDependency(Context.getLocalModule(), path);
-		var raw = sys.io.File.getContent(path);
+
 
 		// Parse JSON
+		var raw = sys.io.File.getContent(path);
 		var jsonPos = Context.makePosition({ file:path, min:1, max:1 });
 		var json = try haxe.Json.parse(raw) catch(_) null;
 		if( json==null ) {
@@ -119,7 +132,7 @@ class ConstDbBuilder {
 
 			// Add field and default value
 			if( kind!=null ) {
-				dbTypeDef.push({ name:k, pos:pos, kind:kind });
+				dbTypeDef.push({ name:k, pos:pos, kind:kind, doc: k + " *["+fileName+"]* " });
 				dbDefaults.push({ field:k, expr:macro $v{val} });
 			}
 		}
@@ -163,11 +176,16 @@ class ConstDbBuilder {
 			Context.fatalError("File not found: "+basePath, pos);
 			return;
 		}
+
+		var fileName = dn.FilePath.extractFileWithExt(path);
+		Context.registerModuleDependency(Context.getLocalModule(), path);
+
 		var raw = sys.io.File.getContent(path);
 		if( raw.indexOf('"ConstDb"')<0 ) {
-			Context.fatalError("CastleDB file should contain a ConstDb sheet.", pos);
+			Context.fatalError('$fileName file should contain a ConstDb sheet.', pos);
 			return;
 		}
+
 
 
 		// Float value resolver
@@ -178,11 +196,10 @@ class ConstDbBuilder {
 			kind: FFun({
 				args: [
 					{ name:"constId", type:Context.getType("CastleDb.ConstDbKind").toComplexType() },
-					{ name:"valueIdx", type: macro:Int, opt:true, value:macro 1 },
 				],
 				ret: macro:Float,
 				expr: macro {
-					return valueIdx<1 || valueIdx>3 ? 0 : Reflect.field( CastleDb.ConstDb.get(constId), "value"+valueIdx );
+					return Reflect.field( CastleDb.ConstDb.get(constId), "value" );
 				},
 			}),
 			meta: [
@@ -191,58 +208,31 @@ class ConstDbBuilder {
 			],
 		});
 
-		// String desc resolver
-		baseFields.push({
-			name: "_resolveCdbDesc",
-			access: [AStatic, APublic, AInline],
-			pos: pos,
-			kind: FFun({
-				args: [
-					// { name:"constId", type: macro:String },
-					{ name:"constId", type:Context.getType("CastleDb.ConstDbKind").toComplexType() },
-					{ name:"valueIdx", type: macro:Int, opt:true, value:macro 1 },
-				],
-				ret: macro:Null<String>,
-				expr: macro {
-					return valueIdx<1 || valueIdx>3 ? null : Reflect.field( CastleDb.ConstDb.get(constId), "desc"+valueIdx );
-				},
-			}),
-			meta: [{ name:":noCompletion", pos:pos }, { name:":keep", pos:pos }],
-		});
-
-		// Iterate all const IDs
-		var settingIdReg = ~/"constId"\s*:\s*"(.*?)"/gim;
-		var fillExprs : Array<Expr> = [];
-		while( settingIdReg.match(raw) ) {
-			var id = settingIdReg.matched(1);
-
-			for(i in 1...4) {
-				var subId = id+"_"+i;
-
-				// Float value getter
-				dbTypeDef.push({
-					name: subId,
-					pos: pos,
-					kind: FVar(macro:Float),
-				});
-				dbDefaults.push({ field:subId, expr: macro 0. });
-				fillExprs.push( macro db.$subId = _resolveCdbValue( cast $v{id}, $v{i} ) );
-			}
-
-			// String desc getter
-			dbTypeDef.push({
-				name: id+"_desc",
-				pos: pos,
-				kind: FVar(macro:Int->Null<String>),
-			});
-			dbDefaults.push({
-				field:id+"_desc",
-				expr: macro function(valueIndex:Int) { return _resolveCdbDesc( cast $v{id}, valueIndex); }
-			});
-
-			// Continue on next ID
-			raw = settingIdReg.matchedRight();
+		// Parse JSON
+		var json : { sheets:Array<{name:String, lines:Array<Dynamic>}> } = try haxe.Json.parse(raw) catch(_) null;
+		if( json==null ) {
+			Context.fatalError("CastleDB JSON parsing failed!", pos);
+			return;
 		}
+
+		// List constants
+		var fillExprs : Array<Expr> = [];
+		for(sheet in json.sheets)
+			if( sheet.name=="ConstDb" ) {
+				for(l in sheet.lines) {
+					var id = Reflect.field(l, "constId");
+					var doc = Reflect.field(l,"doc");
+
+					dbTypeDef.push({
+						name: id,
+						pos: pos,
+						doc: ( doc==null ? id : doc ) + "  *["+fileName+"]* ",
+						kind: FVar(macro:Float),
+					});
+					dbDefaults.push({ field:id, expr:macro 0. });
+					fillExprs.push( macro db.$id = _resolveCdbValue( cast $v{id} ) );
+				}
+			}
 
 		// Create
 		baseFields.push({
